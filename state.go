@@ -35,10 +35,11 @@ func updateState(s *state, db *sql.DB) {
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerAgg)
-	cmds.register("addfeed", handlerAddFeed)
+	cmds.register("addfeed", middlewareLoggedIn(handlerAddFeed))
 	cmds.register("feeds", handlerFeeds)
-	cmds.register("follow", handlerFollow)
-	cmds.register("following", handlerFollowing)
+	cmds.register("follow", middlewareLoggedIn(handlerFollow))
+	cmds.register("following", middlewareLoggedIn(handlerFollowing))
+	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
 
 	input := os.Args
 	if len(input) < 2 {
@@ -74,6 +75,16 @@ func (c *commands) run(s *state, cmd command) error {
 
 func (c *commands) register(name string, f func(*state, command) error) {
 	c.Commands[name] = f
+}
+
+func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
+	return func(s *state, cmd command) error {
+		currentUser, err := s.Db.GetUser(context.Background(), s.Cfg.CurrentUserName)
+		if err != nil {
+			log.Fatalln("Invalid current user")
+		}
+		return handler(s, cmd, currentUser)
+	}
 }
 
 func handlerLogin(s *state, cmd command) error {
@@ -116,15 +127,12 @@ func handlerRegister(s *state, cmd command) error {
 		Name:      name,
 	}
 
-	user, err := s.Db.CreateUser(context.Background(), params)
+	_, err := s.Db.CreateUser(context.Background(), params)
 	if err != nil {
 		log.Fatalln("Error creating user")
 	}
 
-	err = s.Cfg.SetUser(user.Name)
-	if err != nil {
-		log.Fatalln("Error setting username")
-	}
+	handlerLogin(s, cmd)
 	return nil
 }
 
@@ -165,13 +173,9 @@ func handlerAgg(s *state, cmd command) error {
 	return nil
 }
 
-func handlerAddFeed(s *state, cmd command) error {
+func handlerAddFeed(s *state, cmd command, currentUser database.User) error {
 	if len(cmd.Args) < 2 {
 		log.Fatalln("Addfeed requires name and url")
-	}
-	currentUser, err := s.Db.GetUser(context.Background(), s.Cfg.CurrentUserName)
-	if err != nil {
-		log.Fatalln("Invalid current user")
 	}
 
 	ctx := context.Background()
@@ -196,7 +200,10 @@ func handlerAddFeed(s *state, cmd command) error {
 		log.Fatalf("Error adding feed: %v", err)
 	}
 	cmd.Args[0] = cmd.Args[1]
-	err = handlerFollow(s, cmd)
+	err = handlerFollow(s, cmd, currentUser)
+	if err != nil {
+		log.Fatalln(err)
+	}
 
 	fmt.Println(feed)
 
@@ -220,13 +227,9 @@ func handlerFeeds(s *state, cmd command) error {
 	return nil
 }
 
-func handlerFollow(s *state, cmd command) error {
+func handlerFollow(s *state, cmd command, currentUser database.User) error {
 	if len(cmd.Args) < 1 {
 		log.Fatalln("Follow requires url argument")
-	}
-	currentUser, err := s.Db.GetUser(context.Background(), s.Cfg.CurrentUserName)
-	if err != nil {
-		log.Fatalln("Invalid current user")
 	}
 
 	desiredFeed, err := s.Db.GetFeedFromURL(context.Background(), cmd.Args[0])
@@ -258,12 +261,7 @@ func handlerFollow(s *state, cmd command) error {
 	return nil
 }
 
-func handlerFollowing(s *state, cmd command) error {
-	currentUser, err := s.Db.GetUser(context.Background(), s.Cfg.CurrentUserName)
-	if err != nil {
-		log.Fatalln("Invalid current user")
-	}
-
+func handlerFollowing(s *state, cmd command, currentUser database.User) error {
 	following, err := s.Db.GetFeedFollowsForUser(context.Background(), currentUser.ID)
 	if err != nil {
 		log.Fatalf("Could not retrieve follow list for %s\n", currentUser.Name)
@@ -272,6 +270,28 @@ func handlerFollowing(s *state, cmd command) error {
 	fmt.Printf("%s is following these feeds:\n", currentUser.Name)
 	for _, feed := range following {
 		fmt.Printf("%s | %s\n", feed.FeedName, feed.UserName)
+	}
+
+	return nil
+}
+
+func handlerUnfollow(s *state, cmd command, currentUser database.User) error {
+	toUnfollow, err := s.Db.GetFeedFromURL(context.Background(), cmd.Args[0])
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	ctx := context.Background()
+	user_id := currentUser.ID
+	feed_id := toUnfollow.ID
+
+	params := database.UnfollowParams{
+		UserID: user_id,
+		FeedID: feed_id,
+	}
+	err = s.Db.Unfollow(ctx, params)
+	if err != nil {
+		log.Fatalf("Could not unfollow %s", toUnfollow.Name)
 	}
 
 	return nil
