@@ -28,10 +28,16 @@ Create the database and connect to it:
 Set user password:
 > ALTER USER postgres PASSWORD 'postgres';
 
+Configure the database by performing migrations. I recommend installing Goose for this:
+> go install github.com/pressly/goose/v3/cmd/goose@latest
+
+Then run (you may need to edit this connection string) from the main directory:
+> cd sql/schema
+> goose postgres postgres://postgres:postgres@localhost:5432/gator up
 
 Download the repo and use "go install ." from inside the main directory to install the gator CLI
 
-Move the .gatorconfig.json file to your home directory
+Move the .gatorconfig.json file to your home directory. You may need to change the connection string it contains.
 
 ## Commands
 
