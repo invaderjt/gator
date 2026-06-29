@@ -35,6 +35,8 @@ func updateState(s *state, db *sql.DB) {
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerAgg)
+	cmds.register("addfeed", handlerAddFeed)
+	cmds.register("feeds", handlerFeeds)
 
 	input := os.Args
 	if len(input) < 2 {
@@ -161,5 +163,46 @@ func handlerAgg(s *state, cmd command) error {
 
 	fmt.Println(data)
 
+	return nil
+}
+
+func handlerAddFeed(s *state, cmd command) error {
+	if len(cmd.Args) < 2 {
+		log.Fatalln("Addfeed requires name and url")
+	}
+	currentUser, err := s.Db.GetUser(context.Background(), s.Cfg.CurrentUserName)
+	if err != nil {
+		log.Fatalln("Invalid current user")
+	}
+
+	ctx := context.Background()
+	uuid := uuid.New()
+	created_at := time.Now()
+	updated_at := created_at
+	name := cmd.Args[0]
+	url := cmd.Args[1]
+	user_id := currentUser.ID
+
+	params := database.AddFeedParams{
+		ID:        uuid,
+		CreatedAt: created_at,
+		UpdatedAt: updated_at,
+		Name:      name,
+		Url:       url,
+		UserID:    user_id,
+	}
+
+	feed, err := s.Db.AddFeed(ctx, params)
+	if err != nil {
+		log.Fatalf("Error adding feed: %v", err)
+	}
+
+	fmt.Println(feed)
+
+	return nil
+}
+
+func handlerFeeds(s *state, cmd command) error {
+	//todo
 	return nil
 }
